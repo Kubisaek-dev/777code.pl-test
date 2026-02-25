@@ -8,11 +8,11 @@ Kompletny projekt zawiera **2 strony www (2 aplikacje)**:
 ## Funkcje
 
 ### 1) Client Shop
-- Pobieranie produktów z endpointu `GET /v4/client/public/shop` (Swagger yshop.pl).
+- Pobieranie produktów z API v4 (`/public/shop`, `/public/page/{slug}`, `/public/servers/{id}`) z fallbackiem.
 - Tworzenie płatności przez `POST /v4/client/private/payments/make`.
 - Wymuszenie aktywnej licencji przy każdym żądaniu.
-- Konfiguracja URL strony klienta (`SITE_URL`) – licencja jest przypinana do domeny.
-- Obsługa wymaganych nagłówków OAS: `X-API-KEY`, `X-APP-PLATFORM`, `X-APP-PLATFORM-VERSION`, `X-APP-PLATFORM-ENGINE`.
+- Routing jak yshop: `/shop/{slug}` i `/shop/{slug}/server/{serverId}`.
+- Obsługa wymaganych nagłówków OAS: `X-API-KEY`, `X-APP-PLATFORM`, `X-APP-PLATFORM-VERSION`, `X-APP-PLATFORM-ENGINE` + fallback `Authorization: Bearer`.
 
 ### 2) License Server (Admin)
 - Logowanie admina (session + secure cookies).
@@ -60,6 +60,7 @@ Ustaw m.in.:
 - `LICENSE_KEY`
 - `LICENSE_API_BASE` (np. `http://localhost:4000`)
 - `YSHOP_API_BASE`, `YSHOP_PUBLIC_KEY`, `YSHOP_PRIVATE_KEY`
+- `YSHOP_SHOP_SLUG` (opcjonalny domyślny slug)
 - `YSHOP_PLATFORM`, `YSHOP_PLATFORM_VERSION`, `YSHOP_PLATFORM_ENGINE`
 
 ### 4. Uruchom
@@ -177,12 +178,12 @@ Ustaw w `apps/client-shop/.env`:
 YSHOP_API_BASE=https://api.yshop.pl
 YSHOP_PUBLIC_KEY=twoj_public_key
 YSHOP_PRIVATE_KEY=twoj_private_secret_key
+YSHOP_SHOP_SLUG=asdas715612as
 YSHOP_PLATFORM=platform/web
 YSHOP_PLATFORM_VERSION=1.0.0
 YSHOP_PLATFORM_ENGINE=yshop-itemshop-license-suite
 ```
 
-Jeśli endpointy w Twoim planie yshop są inne, podmień `YSHOP_PRODUCTS_PATH` i `YSHOP_ORDERS_PATH`.
 
 
 ## Fix problemu `MISSING_LICENSE_KEY`
@@ -208,6 +209,7 @@ Najczęstsze przyczyny:
 ```env
 YSHOP_PUBLIC_KEY=publ_xxx
 YSHOP_PRIVATE_KEY=priv_xxx
+YSHOP_SHOP_SLUG=asdas715612as
 YSHOP_PLATFORM=platform/web
 YSHOP_PLATFORM_VERSION=1.0.0
 YSHOP_PLATFORM_ENGINE=yshop-itemshop-license-suite
@@ -221,3 +223,26 @@ YSHOP_PLATFORM_ENGINE=yshop-itemshop-license-suite
   - potem `Authorization: Bearer ...` (zgodnie ze starym działającym przykładem).
 
 Dzięki temu integracja działa zarówno pod nowy Swagger, jak i warianty starsze.
+
+
+## Czy to musi działać na serwerze z publicznym IP?
+
+Nie — **łączenie do `https://api.yshop.pl` może działać lokalnie** (na Twoim komputerze), o ile:
+1. masz internet,
+2. klucze są poprawne,
+3. nagłówki są poprawnie wysyłane,
+4. firewall/proxy nie blokuje ruchu.
+
+Publiczne IP jest potrzebne dopiero wtedy, gdy chcesz wystawić sklep/publiczny webhook dla klientów z internetu.
+
+## Routing jak w yshop (wybór serwera)
+
+Teraz sklep obsługuje:
+- `/shop/{slug}`
+- `/shop/{slug}/server/{serverId}`
+
+Przykład:
+- `http://localhost:3000/shop/asdas715612as`
+- `http://localhost:3000/shop/asdas715612as/server/12457615`
+
+W UI kliknięcie serwera przełącza URL i filtruje produkty pod wybrany serwer.
