@@ -23,6 +23,15 @@ Kompletny projekt zawiera **2 strony www (2 aplikacje)**:
 
 ---
 
+
+
+## Co zostało poprawione teraz
+- Panel licencji ma pełny front z CSS + osobnym JS (`/assets/admin.css`, `/assets/admin.js`) i działa pod `/admin`.
+- Dodane akcje: tworzenie licencji, przypinanie domen, odpinanie domen, blokada/odblokowanie i usuwanie licencji.
+- Dodany podgląd audytu akcji (`/api/audit`) w panelu.
+- Poprawione nagłówki security (CSP) tak, żeby panel nie był „białą stroną”.
+- Sklep ma nowy styl i obsługę `YSHOP_PUBLIC_KEY` + konfigurowalne endpointy produktów/zamówień.
+
 ## Start
 
 ### 1. Instalacja
@@ -128,3 +137,46 @@ git push -u origin main
 ```
 
 Po tym kod będzie widoczny na Twoim GitHubie.
+
+
+## Komendy (kopiuj/wklej)
+
+### 1) Uruchomienie lokalnie (2 terminale)
+```bash
+npm install
+cp apps/license-server/.env.example apps/license-server/.env
+cp apps/client-shop/.env.example apps/client-shop/.env
+```
+
+Terminal 1:
+```bash
+npm run dev:license
+```
+
+Terminal 2:
+```bash
+npm run dev:shop
+```
+
+### 2) Logowanie do panelu
+Ustaw w `apps/license-server/.env`:
+```env
+ADMIN_USER=admin
+ADMIN_PASSWORD=super-mocne-haslo
+SESSION_SECRET=losowy_dlugi_secret
+LICENSE_SIGNING_SECRET=losowy_dlugi_secret_2
+```
+
+Panel: `http://localhost:4000/admin`
+
+### 3) Konfiguracja połączenia z api.yshop.pl
+Ustaw w `apps/client-shop/.env`:
+```env
+YSHOP_API_BASE=https://api.yshop.pl
+YSHOP_API_KEY=twoj_token_api
+YSHOP_PUBLIC_KEY=twoj_public_key
+YSHOP_PRODUCTS_PATH=/products
+YSHOP_ORDERS_PATH=/orders
+```
+
+Jeśli endpointy w Twoim planie yshop są inne, podmień `YSHOP_PRODUCTS_PATH` i `YSHOP_ORDERS_PATH`.

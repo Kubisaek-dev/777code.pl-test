@@ -4,11 +4,16 @@ import rateLimit from 'express-rate-limit';
 import session from 'express-session';
 import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { nanoid } from 'nanoid';
 import { createDb } from './db.js';
 import { normalizeDomain, signPayload, safeEqual } from './security.js';
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = Number(process.env.PORT || 4000);
@@ -23,9 +28,21 @@ const DATA_FILE = process.env.DATA_FILE || './data/licenses.json';
 app.set('trust proxy', TRUST_PROXY);
 const db = createDb(DATA_FILE);
 
-app.use(helmet());
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'"],
+        imgSrc: ["'self'", 'data:']
+      }
+    }
+  })
+);
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+app.use('/assets', express.static(path.join(__dirname, '../public')));
 
 app.use(
   session({
@@ -60,38 +77,30 @@ function addAudit(action, details = {}) {
   });
 }
 
-app.get('/admin', (req, res) => {
+function getLicenseByKey(data, key) {
+  return data.licenses.find((l) => l.key === key);
+}
+
+app.get('/admin', (_req, res) => {
   res.type('html').send(`<!doctype html>
-<html lang="pl"><head><meta charset="utf-8"><title>License Admin</title>
-<style>body{font-family:Arial;max-width:900px;margin:20px auto;padding:0 12px}input,button{padding:8px;margin:4px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:8px}</style>
-</head><body>
-<h1>License Admin</h1>
-<div id="auth"></div><div id="app"></div>
-<script>
-async function login(e){e.preventDefault();const fd=new FormData(e.target);const r=await fetch('/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(fd))});if(r.ok){render()}else alert('Błąd logowania')}
-async function logout(){await fetch('/auth/logout',{method:'POST'});render()}
-async function fetchJSON(url,opts){const r=await fetch(url,opts);if(!r.ok)throw new Error(await r.text());return r.json()}
-async function render(){
-const me=await fetch('/auth/me').then(r=>r.json());
-const auth=document.getElementById('auth');
-const app=document.getElementById('app');
-if(!me.auth){
-auth.innerHTML='<form onsubmit="login(event)"><input name="username" placeholder="login" required><input name="password" type="password" placeholder="hasło" required><button>Zaloguj</button></form>';
-app.innerHTML='';
-return;
-}
-auth.innerHTML='<button onclick="logout()">Wyloguj</button>';
-const data=await fetchJSON('/api/licenses');
-const rows=data.items.map(function(l){
-return '<tr><td>'+l.key+'</td><td>'+(l.blocked?'BLOCKED':'ACTIVE')+'</td><td>'+l.domains.join(', ')+'</td><td><form class="bind" data-key="'+l.key+'"><input name="domain" placeholder="example.com"><button>Przypnij</button></form><button onclick="toggle(\''+l.key+'\','+l.blocked+')">'+(l.blocked?'Odblokuj':'Zablokuj')+'</button></td></tr>';
-}).join('');
-app.innerHTML='<h2>Nowa licencja</h2><form id="newLic"><input name="maxDomains" type="number" value="1" min="1"><input name="expiresAt" type="datetime-local"><button>Utwórz</button></form><h2>Licencje</h2><table><tr><th>Key</th><th>Status</th><th>Domeny</th><th>Akcje</th></tr>'+rows+'</table>';
-document.getElementById('newLic').onsubmit=async function(ev){ev.preventDefault();const fd=new FormData(ev.target);await fetchJSON('/api/licenses',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({maxDomains:Number(fd.get('maxDomains')),expiresAt:fd.get('expiresAt')||null})});render()};
-document.querySelectorAll('form.bind').forEach(function(f){f.onsubmit=async function(ev){ev.preventDefault();const fd=new FormData(ev.target);await fetchJSON('/api/licenses/'+f.dataset.key+'/bind',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain:fd.get('domain')})});render()}});
-window.toggle=async function(key,blocked){await fetchJSON('/api/licenses/'+key+'/'+(blocked?'unblock':'block'),{method:'POST'});render()}
-}
-render();
-</script></body></html>`);
+<html lang="pl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>YShop License Admin</title>
+    <link rel="stylesheet" href="/assets/admin.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="header">
+        <h1>YShop License Admin</h1>
+      </header>
+      <section id="auth-root"></section>
+      <section id="app-root"></section>
+    </main>
+    <script src="/assets/admin.js"></script>
+  </body>
+</html>`);
 });
 
 app.post('/auth/login', authLimiter, async (req, res) => {
@@ -124,9 +133,16 @@ app.get('/auth/me', (req, res) => {
   res.json({ auth: Boolean(req.session?.admin) });
 });
 
-app.get('/api/licenses', requireAdmin, (req, res) => {
+app.get('/api/licenses', requireAdmin, (_req, res) => {
   const data = db.read();
-  res.json({ items: data.licenses });
+  const items = [...data.licenses].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  res.json({ items });
+});
+
+app.get('/api/audit', requireAdmin, (_req, res) => {
+  const data = db.read();
+  const items = [...data.audit].sort((a, b) => b.at.localeCompare(a.at));
+  res.json({ items });
 });
 
 app.post('/api/licenses', requireAdmin, (req, res) => {
@@ -135,6 +151,10 @@ app.post('/api/licenses', requireAdmin, (req, res) => {
 
   if (!Number.isFinite(maxDomains) || maxDomains < 1) {
     return res.status(400).json({ error: 'Invalid maxDomains' });
+  }
+
+  if (expiresAt && Number.isNaN(new Date(expiresAt).getTime())) {
+    return res.status(400).json({ error: 'Invalid expiresAt' });
   }
 
   const key = `LIC-${nanoid(18)}`;
@@ -161,41 +181,66 @@ app.post('/api/licenses/:key/bind', requireAdmin, (req, res) => {
   const domain = normalizeDomain(req.body?.domain);
   if (!domain) return res.status(400).json({ error: 'Invalid domain' });
 
-  let data;
+  let output;
   try {
-    data = db.withData((state) => {
-      const lic = state.licenses.find((l) => l.key === key);
-      if (!lic) return state;
+    output = db.withData((state) => {
+      const lic = getLicenseByKey(state, key);
+      if (!lic) throw new Error('LICENSE_NOT_FOUND');
+
       if (!lic.domains.includes(domain)) {
         if (lic.domains.length >= lic.maxDomains) {
           throw new Error('DOMAIN_LIMIT');
         }
         lic.domains.push(domain);
       }
+
       return state;
     });
   } catch (err) {
     if (err.message === 'DOMAIN_LIMIT') {
       return res.status(400).json({ error: 'Domain limit reached for this license' });
     }
+    if (err.message === 'LICENSE_NOT_FOUND') {
+      return res.status(404).json({ error: 'License not found' });
+    }
     return res.status(500).json({ error: 'Unexpected error' });
   }
 
-  const lic = data.licenses.find((l) => l.key === key);
-  if (!lic) return res.status(404).json({ error: 'License not found' });
+  const lic = getLicenseByKey(output, key);
   addAudit('license_bound_domain', { key, domain });
+  res.json({ item: lic });
+});
+
+app.post('/api/licenses/:key/unbind', requireAdmin, (req, res) => {
+  const key = req.params.key;
+  const domain = normalizeDomain(req.body?.domain);
+  if (!domain) return res.status(400).json({ error: 'Invalid domain' });
+
+  const data = db.withData((state) => {
+    const lic = getLicenseByKey(state, key);
+    if (!lic) return state;
+    lic.domains = lic.domains.filter((d) => d !== domain);
+    return state;
+  });
+
+  const lic = getLicenseByKey(data, key);
+  if (!lic) return res.status(404).json({ error: 'License not found' });
+
+  addAudit('license_unbound_domain', { key, domain });
   res.json({ item: lic });
 });
 
 app.post('/api/licenses/:key/block', requireAdmin, (req, res) => {
   const key = req.params.key;
   const data = db.withData((state) => {
-    const lic = state.licenses.find((l) => l.key === key);
+    const lic = getLicenseByKey(state, key);
     if (lic) lic.blocked = true;
     return state;
   });
-  const lic = data.licenses.find((l) => l.key === key);
+
+  const lic = getLicenseByKey(data, key);
   if (!lic) return res.status(404).json({ error: 'License not found' });
+
   addAudit('license_blocked', { key });
   res.json({ item: lic });
 });
@@ -203,14 +248,33 @@ app.post('/api/licenses/:key/block', requireAdmin, (req, res) => {
 app.post('/api/licenses/:key/unblock', requireAdmin, (req, res) => {
   const key = req.params.key;
   const data = db.withData((state) => {
-    const lic = state.licenses.find((l) => l.key === key);
+    const lic = getLicenseByKey(state, key);
     if (lic) lic.blocked = false;
     return state;
   });
-  const lic = data.licenses.find((l) => l.key === key);
+
+  const lic = getLicenseByKey(data, key);
   if (!lic) return res.status(404).json({ error: 'License not found' });
+
   addAudit('license_unblocked', { key });
   res.json({ item: lic });
+});
+
+app.delete('/api/licenses/:key', requireAdmin, (req, res) => {
+  const key = req.params.key;
+  let removed = false;
+
+  db.withData((state) => {
+    const before = state.licenses.length;
+    state.licenses = state.licenses.filter((l) => l.key !== key);
+    removed = state.licenses.length !== before;
+    return state;
+  });
+
+  if (!removed) return res.status(404).json({ error: 'License not found' });
+
+  addAudit('license_deleted', { key });
+  res.json({ ok: true });
 });
 
 app.post('/api/licenses/verify', (req, res) => {
@@ -222,7 +286,7 @@ app.post('/api/licenses/verify', (req, res) => {
     return res.status(400).json({ valid: false, reason: 'INVALID_INPUT' });
   }
 
-  const lic = db.read().licenses.find((l) => l.key === key);
+  const lic = getLicenseByKey(db.read(), key);
   let valid = true;
   let reason = 'OK';
 
