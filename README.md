@@ -30,7 +30,7 @@ Kompletny projekt zawiera **2 strony www (2 aplikacje)**:
 - Dodane akcje: tworzenie licencji, przypinanie domen, odpinanie domen, blokada/odblokowanie i usuwanie licencji.
 - Dodany podgląd audytu akcji (`/api/audit`) w panelu.
 - Poprawione nagłówki security (CSP) tak, żeby panel nie był „białą stroną”.
-- Sklep ma nowy styl i obsługę `YSHOP_PUBLIC_KEY` + konfigurowalne endpointy produktów/zamówień.
+- Sklep ma nowy styl i obsługę `YSHOP_PUBLIC_KEY` + `YSHOP_PRIVATE_KEY` (secret) oraz konfigurowalne endpointy produktów/zamówień.
 
 ## Start
 
@@ -58,7 +58,7 @@ Ustaw m.in.:
 - `SITE_URL` (np. `https://twojsklep.pl`)
 - `LICENSE_KEY`
 - `LICENSE_API_BASE` (np. `http://localhost:4000`)
-- `YSHOP_API_BASE` i `YSHOP_API_KEY`
+- `YSHOP_API_BASE`, `YSHOP_PUBLIC_KEY`, `YSHOP_PRIVATE_KEY`
 
 ### 4. Uruchom
 Terminal 1:
@@ -173,8 +173,8 @@ Panel: `http://localhost:4000/admin`
 Ustaw w `apps/client-shop/.env`:
 ```env
 YSHOP_API_BASE=https://api.yshop.pl
-YSHOP_API_KEY=twoj_token_api
 YSHOP_PUBLIC_KEY=twoj_public_key
+YSHOP_PRIVATE_KEY=twoj_private_secret_key
 YSHOP_PRODUCTS_PATH=/products
 YSHOP_ORDERS_PATH=/orders
 ```

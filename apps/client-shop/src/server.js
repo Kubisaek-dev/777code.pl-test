@@ -12,8 +12,8 @@ const LICENSE_KEY = process.env.LICENSE_KEY || '';
 const LICENSE_API_BASE = process.env.LICENSE_API_BASE || 'http://localhost:4000';
 
 const YSHOP_API_BASE = process.env.YSHOP_API_BASE || 'https://api.yshop.pl';
-const YSHOP_API_KEY = process.env.YSHOP_API_KEY || '';
 const YSHOP_PUBLIC_KEY = process.env.YSHOP_PUBLIC_KEY || '';
+const YSHOP_PRIVATE_KEY = process.env.YSHOP_PRIVATE_KEY || '';
 const YSHOP_PRODUCTS_PATH = process.env.YSHOP_PRODUCTS_PATH || '/products';
 const YSHOP_ORDERS_PATH = process.env.YSHOP_ORDERS_PATH || '/orders';
 
@@ -36,13 +36,13 @@ function yshopHeaders(extra = {}) {
     ...extra
   };
 
-  if (YSHOP_API_KEY) {
-    headers.authorization = `Bearer ${YSHOP_API_KEY}`;
-  }
-
   if (YSHOP_PUBLIC_KEY) {
     headers['x-public-key'] = YSHOP_PUBLIC_KEY;
-    headers['x-api-key'] = YSHOP_PUBLIC_KEY;
+  }
+
+  if (YSHOP_PRIVATE_KEY) {
+    headers['x-private-key'] = YSHOP_PRIVATE_KEY;
+    headers['x-secret-key'] = YSHOP_PRIVATE_KEY;
   }
 
   return headers;
@@ -125,7 +125,7 @@ function renderShopPage({ products, apiError }) {
       <section class='hero'>
         <h1>YShop ItemShop</h1>
         <p class='muted'>Domena licencji: <b>${siteDomain}</b></p>
-        <p class='muted'>Integracja: ${YSHOP_PUBLIC_KEY ? 'public key + API key/bearer (jeśli ustawione)' : 'API key/bearer'}</p>
+        <p class='muted'>Integracja: public key + private(secret) key</p>
       </section>
 
       ${apiError ? `<div class='err'>Błąd API YShop: ${apiError}</div>` : ''}
@@ -190,8 +190,8 @@ app.get('/health', async (_req, res) => {
     license,
     yshop: {
       base: YSHOP_API_BASE,
-      usesApiKey: Boolean(YSHOP_API_KEY),
       usesPublicKey: Boolean(YSHOP_PUBLIC_KEY),
+      usesPrivateKey: Boolean(YSHOP_PRIVATE_KEY),
       productsPath: YSHOP_PRODUCTS_PATH,
       ordersPath: YSHOP_ORDERS_PATH
     }
