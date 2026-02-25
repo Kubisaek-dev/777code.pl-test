@@ -1,0 +1,40 @@
+{
+  "licenses": [
+    {
+      "key": "LIC-_d-hIO9UyQyya5wEi0",
+      "blocked": false,
+      "domains": [
+        "localhost"
+      ],
+      "maxDomains": 1,
+      "createdAt": "2026-02-25T22:46:36.305Z",
+      "expiresAt": null
+    }
+  ],
+  "audit": [
+    {
+      "at": "2026-02-25T22:46:34.234Z",
+      "action": "login_success",
+      "details": {
+        "username": "admin"
+      }
+    },
+    {
+      "at": "2026-02-25T22:46:36.305Z",
+      "action": "license_created",
+      "details": {
+        "key": "LIC-_d-hIO9UyQyya5wEi0",
+        "maxDomains": 1,
+        "expiresAt": null
+      }
+    },
+    {
+      "at": "2026-02-25T22:48:23.933Z",
+      "action": "license_bound_domain",
+      "details": {
+        "key": "LIC-_d-hIO9UyQyya5wEi0",
+        "domain": "localhost"
+      }
+    }
+  ]
+}
