@@ -18,6 +18,7 @@ const LICENSE_API_BASE = process.env.LICENSE_API_BASE || 'http://localhost:4000'
 const YSHOP_API_BASE = process.env.YSHOP_API_BASE || 'https://api.yshop.pl';
 const YSHOP_PUBLIC_KEY = process.env.YSHOP_PUBLIC_KEY || process.env.PUBLIC_API_KEY || '';
 const YSHOP_PRIVATE_KEY = process.env.YSHOP_PRIVATE_KEY || process.env.PRIVATE_API_KEY || '';
+const YSHOP_SHOP_SLUG = process.env.YSHOP_SHOP_SLUG || '';
 const YSHOP_PLATFORM = process.env.YSHOP_PLATFORM || 'platform/web';
 const YSHOP_PLATFORM_VERSION = process.env.YSHOP_PLATFORM_VERSION || '1.0.0';
 const YSHOP_PLATFORM_ENGINE = process.env.YSHOP_PLATFORM_ENGINE || 'yshop-itemshop-license-suite';
@@ -30,40 +31,6 @@ app.use(express.urlencoded({ extended: false }));
 app.use(rateLimit({ windowMs: 60 * 1000, max: 200 }));
 
 let cachedLicense = { valid: false, checkedAt: 0, reason: 'UNVERIFIED' };
-
-function parsePublicProducts(payload) {
-  const buckets = [
-    payload?.items,
-    payload?.products,
-    payload?.offers,
-    payload?.packages,
-    payload?.data?.items,
-    payload?.data?.products,
-    payload?.data?.offers,
-    payload?.data?.packages,
-    payload?.shop?.items,
-    payload?.shop?.products,
-    payload?.shop?.offers,
-    payload?.shop?.packages
-  ].filter(Array.isArray);
-
-  const raw = buckets.flat();
-  const normalized = raw
-    .map((item) => ({
-      id: item.id ?? item.productId ?? item.uuid,
-      name: item.name ?? item.title ?? item.productName ?? 'Produkt',
-      description: item.description ?? item.shortDescription ?? '',
-      price: item.price ?? item.lowestPrice ?? item.basePrice ?? null,
-      currency: item.currency ?? 'PLN'
-    }))
-    .filter((x) => x.id);
-
-  const map = new Map();
-  for (const p of normalized) {
-    if (!map.has(String(p.id))) map.set(String(p.id), p);
-  }
-  return [...map.values()];
-}
 
 function baseHeaders() {
   return {
@@ -78,11 +45,64 @@ function baseHeaders() {
 function buildAuthCandidates(key) {
   if (!key) return [];
   return [
-    // zgodnie z nową dokumentacją
     { 'x-api-key': key },
-    // fallback pod starsze implementacje
     { authorization: `Bearer ${key}` }
   ];
+}
+
+function parseProducts(payload) {
+  const candidates = [
+    payload,
+    payload?.data,
+    payload?.shop,
+    payload?.server,
+    payload?.page,
+    ...(Array.isArray(payload?.servers) ? payload.servers : []),
+    ...(Array.isArray(payload?.items) ? payload.items : []),
+    ...(Array.isArray(payload?.pages) ? payload.pages : [])
+  ];
+
+  const found = [];
+
+  function collectFrom(obj) {
+    if (!obj || typeof obj !== 'object') return;
+    for (const key of ['items', 'products', 'offers', 'packages', 'kits']) {
+      if (Array.isArray(obj[key])) {
+        found.push(...obj[key]);
+      }
+    }
+  }
+
+  for (const obj of candidates) collectFrom(obj);
+
+  const normalized = found
+    .map((item) => ({
+      id: item.id ?? item.productId ?? item.uuid,
+      name: item.name ?? item.title ?? item.productName ?? 'Produkt',
+      description: item.description ?? item.shortDescription ?? '',
+      price: item.price ?? item.lowestPrice ?? item.basePrice ?? null,
+      currency: item.currency ?? 'PLN',
+      serverId: item.serverId ?? item.server?.id ?? null,
+      original: item
+    }))
+    .filter((item) => item.id);
+
+  const unique = new Map();
+  for (const item of normalized) {
+    if (!unique.has(String(item.id))) unique.set(String(item.id), item);
+  }
+
+  return [...unique.values()];
+}
+
+function parseServers(payload) {
+  const arr = Array.isArray(payload)
+    ? payload
+    : payload?.items || payload?.servers || payload?.data || payload?.data?.servers || [];
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .map((s) => ({ id: s.id ?? s.serverId ?? s.uuid, name: s.name ?? s.title ?? `Serwer ${s.id}` }))
+    .filter((s) => s.id);
 }
 
 async function yshopRequest({ keyType, method = 'GET', endpoint, body = null }) {
@@ -94,7 +114,6 @@ async function yshopRequest({ keyType, method = 'GET', endpoint, body = null }) 
   }
 
   let lastErr = 'Unknown error';
-
   for (const authHeaders of authCandidates) {
     const response = await fetch(`${YSHOP_API_BASE}${endpoint}`, {
       method,
@@ -110,17 +129,12 @@ async function yshopRequest({ keyType, method = 'GET', endpoint, body = null }) 
       payload = { raw: text };
     }
 
-    if (response.ok) {
-      return payload;
-    }
+    if (response.ok) return payload;
 
     const message = payload?.message || payload?.error || payload?.error_message || text || `HTTP ${response.status}`;
     lastErr = `YShop ${response.status}: ${message}`;
 
-    // jeśli to nie auth błąd, nie ma sensu próbować kolejnym sposobem
-    if (![400, 401, 403, 404].includes(response.status)) {
-      break;
-    }
+    if (![400, 401, 403, 404].includes(response.status)) break;
   }
 
   throw new Error(lastErr);
@@ -156,31 +170,72 @@ async function requireLicense(_req, res, next) {
     return res.status(403).type('html').send(`<!doctype html><html lang='pl'><head><meta charset='utf-8'><title>Licencja</title>
       <style>body{font-family:Inter,Arial;background:#0b1220;color:#e2e8f0;padding:24px}.box{max-width:760px;margin:40px auto;background:#111827;border:1px solid #334155;padding:18px;border-radius:12px}</style>
       </head><body><div class='box'><h1>Sklep zablokowany</h1><p>Licencja: <b>${status.reason}</b></p>
-      <p>Jeśli ustawiłeś <code>LICENSE_KEY</code> przed chwilą, zrestartuj <code>npm run dev:shop</code>. Ta aplikacja ładuje .env z <code>apps/client-shop/.env</code>.</p></div></body></html>`);
+      <p>Ta aplikacja ładuje .env z <code>apps/client-shop/.env</code>. Po zmianie kluczy uruchom ponownie <code>npm run dev:shop</code>.</p></div></body></html>`);
   }
   return next();
 }
 
-async function fetchShopBootstrap() {
-  try {
-    const [shop, servers] = await Promise.all([
-      yshopRequest({ keyType: 'public', endpoint: '/v4/client/public/shop' }),
-      yshopRequest({ keyType: 'public', endpoint: '/v4/client/public/servers' })
-    ]);
+async function fetchShopData({ shopSlug, serverId }) {
+  const outputs = {};
 
-    const products = parsePublicProducts(shop);
-    return {
-      shop,
-      servers: Array.isArray(servers) ? servers : servers?.items || servers?.data || [],
-      products,
-      error: null
-    };
-  } catch (err) {
-    return { shop: null, products: [], servers: [], error: err.message };
+  const shopPromise = yshopRequest({ keyType: 'public', endpoint: '/v4/client/public/shop' });
+  const serversPromise = yshopRequest({ keyType: 'public', endpoint: '/v4/client/public/servers' });
+  const pagePromise = shopSlug
+    ? yshopRequest({ keyType: 'public', endpoint: `/v4/client/public/page/${encodeURIComponent(shopSlug)}` })
+    : Promise.resolve(null);
+  const serverPromise = serverId
+    ? yshopRequest({ keyType: 'public', endpoint: `/v4/client/public/servers/${encodeURIComponent(serverId)}` })
+    : Promise.resolve(null);
+
+  const [shop, serversRaw, page, serverDetails] = await Promise.allSettled([
+    shopPromise,
+    serversPromise,
+    pagePromise,
+    serverPromise
+  ]);
+
+  outputs.shop = shop.status === 'fulfilled' ? shop.value : null;
+  outputs.serversRaw = serversRaw.status === 'fulfilled' ? serversRaw.value : null;
+  outputs.page = page.status === 'fulfilled' ? page.value : null;
+  outputs.serverDetails = serverDetails.status === 'fulfilled' ? serverDetails.value : null;
+
+  const errorMessages = [shop, serversRaw, page, serverDetails]
+    .filter((r) => r.status === 'rejected')
+    .map((r) => r.reason?.message)
+    .filter(Boolean);
+
+  const products = parseProducts(outputs.shop)
+    .concat(parseProducts(outputs.page))
+    .concat(parseProducts(outputs.serverDetails));
+
+  const uniqueProducts = [];
+  const seen = new Set();
+  for (const p of products) {
+    const key = String(p.id);
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniqueProducts.push(p);
+    }
   }
+
+  const servers = parseServers(outputs.serversRaw);
+
+  const filteredProducts = serverId
+    ? uniqueProducts.filter((p) => !p.serverId || String(p.serverId) === String(serverId))
+    : uniqueProducts;
+
+  return {
+    shopSlug,
+    serverId: serverId || null,
+    shop: outputs.shop,
+    servers,
+    products: filteredProducts,
+    warnings: errorMessages,
+    error: filteredProducts.length ? null : (errorMessages[0] || 'Brak produktów zwróconych przez API')
+  };
 }
 
-function renderPage() {
+function renderPage({ shopSlug = '', serverId = '' }) {
   return `<!doctype html>
 <html lang='pl'>
 <head>
@@ -195,35 +250,68 @@ function renderPage() {
 .price{font-size:22px;color:var(--acc);font-weight:700}button,input,select{width:100%;padding:10px;border-radius:8px;margin-top:8px}
 input,select{border:1px solid #334155;background:#0b1220;color:var(--text)}button{border:none;background:linear-gradient(90deg,#0ea5e9,#22d3ee);font-weight:700;color:#082f49;cursor:pointer}
 .err{margin:12px 0;padding:10px;border-radius:8px;background:#3f0a14;border:1px solid #7f1d1d;color:#fecdd3}.ok{margin:12px 0;padding:10px;border-radius:8px;background:#052e16;border:1px solid #166534;color:#bbf7d0}
-.muted{color:var(--muted)}
+.muted{color:var(--muted)} .servers{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+.server-btn{display:inline-block;padding:8px 12px;border-radius:999px;border:1px solid #334155;color:#cbd5e1;text-decoration:none}
+.server-btn.active{background:#0ea5e9;color:#082f49;border-color:#0ea5e9}
 </style>
 </head>
 <body>
 <main class='wrap'>
   <section class='hero'>
     <h1>Premium ItemShop</h1>
-    <p class='muted'>Połączone z yshop.pl (Swagger v4 client public/private). Domena licencji: <b>${siteDomain}</b></p>
+    <p class='muted'>Widok jak yshop: /shop/{slug}/server/{id}. Domena licencji: <b>${siteDomain}</b></p>
+    <div class='muted'>Wybrany sklep (slug): <b id='slugLabel'>${shopSlug || '-'}</b> | serwer: <b id='serverLabel'>${serverId || 'all'}</b></div>
+    <form id='shopForm'>
+      <input name='shopSlug' placeholder='slug sklepu, np. asdas715612as' value='${shopSlug}' required>
+      <button>Przejdź do sklepu</button>
+    </form>
   </section>
   <div id='alerts'></div>
+  <section id='servers' class='servers'></section>
   <section class='grid' id='products'></section>
 </main>
 <script>
+const initialSlug=${JSON.stringify(shopSlug)};
+const initialServer=${JSON.stringify(serverId)};
 const alerts=document.getElementById('alerts');
 const productsEl=document.getElementById('products');
+const serversEl=document.getElementById('servers');
 
 function setAlert(type,msg){alerts.innerHTML='<div class="'+(type==='ok'?'ok':'err')+'">'+msg+'</div>'}
 
+document.getElementById('shopForm').addEventListener('submit', (ev)=>{
+  ev.preventDefault();
+  const fd=new FormData(ev.target);
+  const slug=String(fd.get('shopSlug')||'').trim();
+  if(!slug)return;
+  window.location.href='/shop/'+encodeURIComponent(slug);
+});
+
 async function boot(){
-  const r=await fetch('/api/bootstrap');
+  const qs=new URLSearchParams({shopSlug:initialSlug,serverId:initialServer||''});
+  const r=await fetch('/api/shop-data?'+qs.toString());
   const data=await r.json();
-  if(!r.ok){setAlert('err',data.error||'Błąd ładowania');return}
+
   if(data.error){setAlert('err',data.error)}
-  if(!data.products?.length){setAlert('err','Brak produktów zwróconych przez /v4/client/public/shop. Sprawdź konfigurację yshop i klucze.');}
+  if(Array.isArray(data.warnings) && data.warnings.length){
+    setAlert('err', (data.error?data.error+' | ':'') + 'API warnings: '+data.warnings.join(' | '));
+  }
+
+  const slug=encodeURIComponent(data.shopSlug||'');
+  const activeServer=String(data.serverId||'');
+  serversEl.innerHTML='<a class="server-btn '+(activeServer===''?'active':'')+'" href="/shop/'+slug+'">Wszystkie</a>'+
+    (data.servers||[]).map(function(s){
+      const id=String(s.id);
+      return '<a class="server-btn '+(id===activeServer?'active':'')+'" href="/shop/'+slug+'/server/'+encodeURIComponent(id)+'">'+(s.name||id)+'</a>';
+    }).join('');
+
+  if(!data.products?.length){
+    productsEl.innerHTML='';
+    if(!data.error)setAlert('err','Brak produktów dla wybranego sklepu/serwera.');
+    return;
+  }
 
   productsEl.innerHTML=(data.products||[]).map(function(p){
-    const options=(data.servers||[]).map(function(s){
-      return '<option value="'+(s.id||'')+'">'+(s.name||s.id||'server')+'</option>';
-    }).join('');
     return '<article class="card">'
       +'<h3>'+(p.name||'Produkt')+'</h3>'
       +'<div class="price">'+((p.price ?? 'N/A'))+' '+(p.currency||'PLN')+'</div>'
@@ -232,36 +320,62 @@ async function boot(){
       +'<form data-id="'+p.id+'">'
       +'<input name="email" type="email" placeholder="email kupującego" required>'
       +'<input name="nickname" placeholder="nick gracza (opcjonalnie)">'
-      +'<select name="serverId"><option value="">serverId (opcjonalnie)</option>'+options+'</select>'
+      +'<input name="serverId" value="'+(activeServer||'')+'" placeholder="serverId (opcjonalnie)">'
       +'<button>Zapłać</button>'
       +'</form>'
       +'</article>';
   }).join('');
 
-  productsEl.querySelectorAll('form').forEach(f=>f.addEventListener('submit', async (ev)=>{
-    ev.preventDefault();
-    const fd=new FormData(f);
-    const body={productId:f.dataset.id,email:fd.get('email'),nickname:fd.get('nickname')||undefined,serverId:fd.get('serverId')||undefined};
-    const rr=await fetch('/api/payments/make',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
-    const out=await rr.json();
-    if(!rr.ok){setAlert('err',out.error||'Błąd płatności');return}
-    const link=out.paymentUrl||out.url||out.paymentLink||out?.payment?.url;
-    if(link){window.location.href=link;return}
-    setAlert('ok','Płatność utworzona. Odpowiedź: '+JSON.stringify(out));
-  }))
+  productsEl.querySelectorAll('form').forEach(function(f){
+    f.addEventListener('submit', async function(ev){
+      ev.preventDefault();
+      const fd=new FormData(f);
+      const body={
+        productId:f.dataset.id,
+        email:fd.get('email'),
+        nickname:fd.get('nickname')||undefined,
+        serverId:fd.get('serverId')||undefined,
+        shopSlug:initialSlug
+      };
+      const rr=await fetch('/api/payments/make',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+      const out=await rr.json();
+      if(!rr.ok){setAlert('err',out.error||'Błąd płatności');return}
+      const link=out.paymentUrl||out.url||out.paymentLink||out?.payment?.url;
+      if(link){window.location.href=link;return}
+      setAlert('ok','Płatność utworzona. Odpowiedź: '+JSON.stringify(out));
+    })
+  })
 }
-boot().catch(e=>setAlert('err',e.message));
+
+boot().catch(function(e){setAlert('err',e.message)});
 </script>
 </body></html>`;
 }
 
 app.get('/', requireLicense, (_req, res) => {
-  res.type('html').send(renderPage());
+  if (YSHOP_SHOP_SLUG) {
+    return res.redirect(`/shop/${encodeURIComponent(YSHOP_SHOP_SLUG)}`);
+  }
+  return res.type('html').send(renderPage({ shopSlug: '', serverId: '' }));
 });
 
-app.get('/api/bootstrap', requireLicense, async (_req, res) => {
-  const data = await fetchShopBootstrap();
-  res.status(data.error ? 502 : 200).json(data);
+app.get('/shop/:shopSlug', requireLicense, (req, res) => {
+  res.type('html').send(renderPage({ shopSlug: req.params.shopSlug, serverId: '' }));
+});
+
+app.get('/shop/:shopSlug/server/:serverId', requireLicense, (req, res) => {
+  res.type('html').send(renderPage({ shopSlug: req.params.shopSlug, serverId: req.params.serverId }));
+});
+
+app.get('/api/shop-data', requireLicense, async (req, res) => {
+  const shopSlug = String(req.query.shopSlug || YSHOP_SHOP_SLUG || '').trim();
+  const serverId = String(req.query.serverId || '').trim();
+  if (!shopSlug) {
+    return res.status(400).json({ error: 'Brak shopSlug. Użyj /shop/{slug}' });
+  }
+
+  const data = await fetchShopData({ shopSlug, serverId });
+  return res.status(data.error ? 502 : 200).json(data);
 });
 
 app.get('/api/payments/products/:id', requireLicense, async (req, res) => {
@@ -277,7 +391,7 @@ app.get('/api/payments/products/:id', requireLicense, async (req, res) => {
 });
 
 app.post('/api/payments/make', requireLicense, async (req, res) => {
-  const { productId, email, nickname, serverId } = req.body || {};
+  const { productId, email, nickname, serverId, shopSlug } = req.body || {};
   if (!productId || !email) {
     return res.status(400).json({ error: 'productId i email są wymagane' });
   }
@@ -287,6 +401,7 @@ app.post('/api/payments/make', requireLicense, async (req, res) => {
     email,
     nickname,
     serverId,
+    shopSlug,
     successUrl: `${SITE_URL}/?payment=success`,
     failUrl: `${SITE_URL}/?payment=fail`
   };
@@ -315,6 +430,7 @@ app.get('/health', async (_req, res) => {
       yshopBase: YSHOP_API_BASE,
       hasPublicKey: Boolean(YSHOP_PUBLIC_KEY),
       hasPrivateKey: Boolean(YSHOP_PRIVATE_KEY),
+      defaultShopSlug: YSHOP_SHOP_SLUG,
       platform: YSHOP_PLATFORM,
       platformVersion: YSHOP_PLATFORM_VERSION,
       platformEngine: YSHOP_PLATFORM_ENGINE
