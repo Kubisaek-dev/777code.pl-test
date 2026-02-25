@@ -8,10 +8,11 @@ Kompletny projekt zawiera **2 strony www (2 aplikacje)**:
 ## Funkcje
 
 ### 1) Client Shop
-- Pobieranie produktów z API YShop.
-- Tworzenie zamówień przez API YShop.
+- Pobieranie produktów z endpointu `GET /v4/client/public/shop` (Swagger yshop.pl).
+- Tworzenie płatności przez `POST /v4/client/private/payments/make`.
 - Wymuszenie aktywnej licencji przy każdym żądaniu.
 - Konfiguracja URL strony klienta (`SITE_URL`) – licencja jest przypinana do domeny.
+- Obsługa wymaganych nagłówków OAS: `X-API-KEY`, `X-APP-PLATFORM`, `X-APP-PLATFORM-VERSION`, `X-APP-PLATFORM-ENGINE`.
 
 ### 2) License Server (Admin)
 - Logowanie admina (session + secure cookies).
@@ -30,7 +31,7 @@ Kompletny projekt zawiera **2 strony www (2 aplikacje)**:
 - Dodane akcje: tworzenie licencji, przypinanie domen, odpinanie domen, blokada/odblokowanie i usuwanie licencji.
 - Dodany podgląd audytu akcji (`/api/audit`) w panelu.
 - Poprawione nagłówki security (CSP) tak, żeby panel nie był „białą stroną”.
-- Sklep ma nowy styl i obsługę `YSHOP_PUBLIC_KEY` + `YSHOP_PRIVATE_KEY` (secret) oraz konfigurowalne endpointy produktów/zamówień.
+- Sklep ma nowy premium styl i działa bezpośrednio pod Swagger v4 (`public/shop` + `private/payments/make`) z kluczem publicznym i prywatnym.
 
 ## Start
 
@@ -59,6 +60,7 @@ Ustaw m.in.:
 - `LICENSE_KEY`
 - `LICENSE_API_BASE` (np. `http://localhost:4000`)
 - `YSHOP_API_BASE`, `YSHOP_PUBLIC_KEY`, `YSHOP_PRIVATE_KEY`
+- `YSHOP_PLATFORM`, `YSHOP_PLATFORM_VERSION`, `YSHOP_PLATFORM_ENGINE`
 
 ### 4. Uruchom
 Terminal 1:
@@ -175,8 +177,21 @@ Ustaw w `apps/client-shop/.env`:
 YSHOP_API_BASE=https://api.yshop.pl
 YSHOP_PUBLIC_KEY=twoj_public_key
 YSHOP_PRIVATE_KEY=twoj_private_secret_key
-YSHOP_PRODUCTS_PATH=/products
-YSHOP_ORDERS_PATH=/orders
+YSHOP_PLATFORM=platform/web
+YSHOP_PLATFORM_VERSION=1.0.0
+YSHOP_PLATFORM_ENGINE=yshop-itemshop-license-suite
 ```
 
 Jeśli endpointy w Twoim planie yshop są inne, podmień `YSHOP_PRODUCTS_PATH` i `YSHOP_ORDERS_PATH`.
+
+
+## Fix problemu `MISSING_LICENSE_KEY`
+
+Jeśli po dodaniu licencji dalej widzisz `MISSING_LICENSE_KEY`:
+
+1. Sprawdź czy klucz jest w `apps/client-shop/.env` (`LICENSE_KEY=LIC-...`).
+2. Zrestartuj shop (`npm run dev:shop`).
+3. Sprawdź health: `http://localhost:3000/health`.
+4. Upewnij się, że domena z `SITE_URL` jest przypięta do licencji w panelu admina.
+
+Aplikacja ładuje teraz `.env` **bezpośrednio z folderu appki** (`apps/client-shop/.env` i `apps/license-server/.env`), więc nie ma problemu z odpalaniem przez workspace z roota.

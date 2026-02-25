@@ -10,10 +10,9 @@ import { nanoid } from 'nanoid';
 import { createDb } from './db.js';
 import { normalizeDomain, signPayload, safeEqual } from './security.js';
 
-dotenv.config();
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.join(__dirname, '../.env') });
 
 const app = express();
 const PORT = Number(process.env.PORT || 4000);
