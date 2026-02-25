@@ -16,8 +16,8 @@ const LICENSE_KEY = process.env.LICENSE_KEY || '';
 const LICENSE_API_BASE = process.env.LICENSE_API_BASE || 'http://localhost:4000';
 
 const YSHOP_API_BASE = process.env.YSHOP_API_BASE || 'https://api.yshop.pl';
-const YSHOP_PUBLIC_KEY = process.env.YSHOP_PUBLIC_KEY || '';
-const YSHOP_PRIVATE_KEY = process.env.YSHOP_PRIVATE_KEY || '';
+const YSHOP_PUBLIC_KEY = process.env.YSHOP_PUBLIC_KEY || process.env.PUBLIC_API_KEY || '';
+const YSHOP_PRIVATE_KEY = process.env.YSHOP_PRIVATE_KEY || process.env.PRIVATE_API_KEY || '';
 const YSHOP_PLATFORM = process.env.YSHOP_PLATFORM || 'platform/web';
 const YSHOP_PLATFORM_VERSION = process.env.YSHOP_PLATFORM_VERSION || '1.0.0';
 const YSHOP_PLATFORM_ENGINE = process.env.YSHOP_PLATFORM_ENGINE || 'yshop-itemshop-license-suite';
@@ -54,9 +54,7 @@ function parsePublicProducts(payload) {
       name: item.name ?? item.title ?? item.productName ?? 'Produkt',
       description: item.description ?? item.shortDescription ?? '',
       price: item.price ?? item.lowestPrice ?? item.basePrice ?? null,
-      currency: item.currency ?? 'PLN',
-      serverId: item.serverId ?? null,
-      original: item
+      currency: item.currency ?? 'PLN'
     }))
     .filter((x) => x.id);
 
@@ -67,16 +65,65 @@ function parsePublicProducts(payload) {
   return [...map.values()];
 }
 
-function yshopHeaders({ keyType = 'public', extra = {} } = {}) {
-  const key = keyType === 'private' ? YSHOP_PRIVATE_KEY : YSHOP_PUBLIC_KEY;
+function baseHeaders() {
   return {
+    accept: 'application/json',
     'content-type': 'application/json',
-    'x-api-key': key,
     'x-app-platform': YSHOP_PLATFORM,
     'x-app-platform-version': YSHOP_PLATFORM_VERSION,
-    'x-app-platform-engine': YSHOP_PLATFORM_ENGINE,
-    ...extra
+    'x-app-platform-engine': YSHOP_PLATFORM_ENGINE
   };
+}
+
+function buildAuthCandidates(key) {
+  if (!key) return [];
+  return [
+    // zgodnie z nową dokumentacją
+    { 'x-api-key': key },
+    // fallback pod starsze implementacje
+    { authorization: `Bearer ${key}` }
+  ];
+}
+
+async function yshopRequest({ keyType, method = 'GET', endpoint, body = null }) {
+  const key = keyType === 'private' ? YSHOP_PRIVATE_KEY : YSHOP_PUBLIC_KEY;
+  const authCandidates = buildAuthCandidates(key);
+
+  if (!authCandidates.length) {
+    throw new Error(`MISSING_${keyType.toUpperCase()}_KEY`);
+  }
+
+  let lastErr = 'Unknown error';
+
+  for (const authHeaders of authCandidates) {
+    const response = await fetch(`${YSHOP_API_BASE}${endpoint}`, {
+      method,
+      headers: { ...baseHeaders(), ...authHeaders },
+      body: body ? JSON.stringify(body) : undefined
+    });
+
+    const text = await response.text();
+    let payload = {};
+    try {
+      payload = text ? JSON.parse(text) : {};
+    } catch {
+      payload = { raw: text };
+    }
+
+    if (response.ok) {
+      return payload;
+    }
+
+    const message = payload?.message || payload?.error || payload?.error_message || text || `HTTP ${response.status}`;
+    lastErr = `YShop ${response.status}: ${message}`;
+
+    // jeśli to nie auth błąd, nie ma sensu próbować kolejnym sposobem
+    if (![400, 401, 403, 404].includes(response.status)) {
+      break;
+    }
+  }
+
+  throw new Error(lastErr);
 }
 
 async function verifyLicense(force = false) {
@@ -114,34 +161,7 @@ async function requireLicense(_req, res, next) {
   return next();
 }
 
-async function yshopRequest({ keyType, method = 'GET', endpoint, body = null }) {
-  const response = await fetch(`${YSHOP_API_BASE}${endpoint}`, {
-    method,
-    headers: yshopHeaders({ keyType }),
-    body: body ? JSON.stringify(body) : undefined
-  });
-
-  let payload;
-  const text = await response.text();
-  try {
-    payload = text ? JSON.parse(text) : {};
-  } catch {
-    payload = { raw: text };
-  }
-
-  if (!response.ok) {
-    const message = payload?.message || payload?.error || text || `HTTP ${response.status}`;
-    throw new Error(`YShop ${response.status}: ${message}`);
-  }
-
-  return payload;
-}
-
 async function fetchShopBootstrap() {
-  if (!YSHOP_PUBLIC_KEY) {
-    return { shop: null, products: [], servers: [], error: 'MISSING_PUBLIC_KEY' };
-  }
-
   try {
     const [shop, servers] = await Promise.all([
       yshopRequest({ keyType: 'public', endpoint: '/v4/client/public/shop' }),
@@ -244,11 +264,19 @@ app.get('/api/bootstrap', requireLicense, async (_req, res) => {
   res.status(data.error ? 502 : 200).json(data);
 });
 
-app.post('/api/payments/make', requireLicense, async (req, res) => {
-  if (!YSHOP_PRIVATE_KEY) {
-    return res.status(400).json({ error: 'MISSING_PRIVATE_KEY in apps/client-shop/.env' });
+app.get('/api/payments/products/:id', requireLicense, async (req, res) => {
+  try {
+    const product = await yshopRequest({
+      keyType: 'private',
+      endpoint: `/v4/client/private/payments/products/${encodeURIComponent(req.params.id)}`
+    });
+    res.json(product);
+  } catch (err) {
+    res.status(502).json({ error: err.message });
   }
+});
 
+app.post('/api/payments/make', requireLicense, async (req, res) => {
   const { productId, email, nickname, serverId } = req.body || {};
   if (!productId || !email) {
     return res.status(400).json({ error: 'productId i email są wymagane' });
