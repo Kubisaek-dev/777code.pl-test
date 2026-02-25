@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Produkty serwera</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <a href="/" class="back-link">← Wróć do listy serwerów</a>
+      <h1 id="server-name"></h1>
+      <div id="products" class="grid"></div>
+    </main>
+
+    <script>
+      function formatPrice(price, currency) {
+        if (!Number.isFinite(price)) return 'Cena niedostępna';
+        return `${price.toFixed(2)} ${currency || 'PLN'}`;
+      }
+
+      async function loadProducts() {
+        const slug = decodeURIComponent(window.location.pathname.replace(/^\//, ''));
+        document.getElementById('server-name').textContent = `Produkty: ${slug}`;
+
+        const response = await fetch(`/api/servers/${encodeURIComponent(slug)}/products`);
+        const data = await response.json();
+
+        const root = document.getElementById('products');
+        root.innerHTML = '';
+
+        (data.products || []).forEach((product) => {
+          const card = document.createElement('article');
+          card.className = 'card product-card';
+          card.innerHTML = `
+            <h2>${product.name}</h2>
+            <p class="price">${formatPrice(product.price, product.currency)}</p>
+            <p class="desc">${product.description || 'Brak opisu produktu.'}</p>
+          `;
+          root.appendChild(card);
+        });
+      }
+
+      loadProducts();
+    </script>
+  </body>
+</html>

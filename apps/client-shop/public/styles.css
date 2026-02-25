@@ -1,0 +1,62 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+  background: #0f1220;
+  color: #f2f4ff;
+}
+
+.container {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 32px 20px;
+}
+
+.muted {
+  color: #97a0c3;
+}
+
+.grid {
+  margin-top: 20px;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+
+.card {
+  background: #1a1f35;
+  color: #f2f4ff;
+  border: 1px solid #2b3458;
+  border-radius: 12px;
+  padding: 16px;
+  text-decoration: none;
+  display: block;
+}
+
+.card:hover {
+  border-color: #5d7aff;
+}
+
+.back-link {
+  color: #98abff;
+  text-decoration: none;
+}
+
+.product-card h2 {
+  margin: 0 0 8px;
+  font-size: 20px;
+}
+
+.price {
+  margin: 0 0 8px;
+  font-weight: 700;
+  color: #8bffcd;
+}
+
+.desc {
+  margin: 0;
+  color: #cfd6f6;
+}
