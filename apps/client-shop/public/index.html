@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Wybór serwera</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>Wybierz serwer</h1>
+      <p class="muted">Po kliknięciu przejdziesz do podstrony z produktami.</p>
+      <div id="server-list" class="grid"></div>
+    </main>
+
+    <script>
+      async function loadServers() {
+        const response = await fetch('/api/servers');
+        const data = await response.json();
+        const root = document.getElementById('server-list');
+
+        root.innerHTML = '';
+        (data.servers || []).forEach((server) => {
+          const link = document.createElement('a');
+          link.href = `/${server.slug}`;
+          link.className = 'card';
+          link.textContent = server.name;
+          root.appendChild(link);
+        });
+      }
+
+      loadServers();
+    </script>
+  </body>
+</html>
