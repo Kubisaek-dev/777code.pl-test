@@ -1,0 +1,70 @@
+:root {
+  --bg: #0f172a;
+  --panel: #111827;
+  --muted: #94a3b8;
+  --text: #e5e7eb;
+  --accent: #22d3ee;
+  --danger: #fb7185;
+  --ok: #4ade80;
+  --warn: #f59e0b;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  background: linear-gradient(180deg, #020617, #0b1222 30%, #0f172a);
+  color: var(--text);
+}
+.container {
+  max-width: 1160px;
+  margin: 0 auto;
+  padding: 24px 16px 40px;
+}
+.header {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  margin-bottom: 20px;
+}
+.card {
+  background: rgba(17, 24, 39, 0.9);
+  border: 1px solid #243147;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.grid { display:grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 920px){ .grid { grid-template-columns: 1fr; } }
+input, button {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: #0b1220;
+  color: var(--text);
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+button {
+  cursor: pointer;
+  background: linear-gradient(90deg, #0ea5e9, #22d3ee);
+  color: #052230;
+  font-weight: 700;
+  border: none;
+}
+button.secondary { background: #1f2937; color: #e5e7eb; border:1px solid #334155; }
+button.danger { background: #7f1d1d; color: #fecaca; }
+button.warn { background: #78350f; color: #fde68a; }
+button.ok { background: #14532d; color: #bbf7d0; }
+small, .muted { color: var(--muted); }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; min-width: 780px; }
+th, td { border-bottom: 1px solid #243147; text-align: left; padding: 10px 8px; vertical-align: top; }
+.badge { display:inline-block; padding: 3px 8px; border-radius: 999px; font-size: 12px; }
+.badge.ok { background:#052e16; color:#86efac; }
+.badge.blocked { background:#450a0a; color:#fda4af; }
+.notice { padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; }
+.notice.error { background:#3f0a14; color:#fecdd3; border:1px solid #7f1d1d; }
+.notice.success { background:#052e16; color:#bbf7d0; border:1px solid #166534; }
+.inline { display:flex; gap:8px; }
+.inline input { margin-bottom: 0; }
