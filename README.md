@@ -195,3 +195,29 @@ Jeśli po dodaniu licencji dalej widzisz `MISSING_LICENSE_KEY`:
 4. Upewnij się, że domena z `SITE_URL` jest przypięta do licencji w panelu admina.
 
 Aplikacja ładuje teraz `.env` **bezpośrednio z folderu appki** (`apps/client-shop/.env` i `apps/license-server/.env`), więc nie ma problemu z odpalaniem przez workspace z roota.
+
+
+## Fix błędu `YShop 401: Please provide a valid Public Key`
+
+Najczęstsze przyczyny:
+1. W `apps/client-shop/.env` masz zły klucz lub spację/znak nowej linii.
+2. Podajesz private key jako public key (lub odwrotnie).
+3. Nie restartujesz `npm run dev:shop` po zmianie `.env`.
+
+### Poprawna konfiguracja
+```env
+YSHOP_PUBLIC_KEY=publ_xxx
+YSHOP_PRIVATE_KEY=priv_xxx
+YSHOP_PLATFORM=platform/web
+YSHOP_PLATFORM_VERSION=1.0.0
+YSHOP_PLATFORM_ENGINE=yshop-itemshop-license-suite
+```
+
+### Jak to działa teraz w kodzie
+- Dla endpointów publicznych (`/v4/client/public/*`) używany jest klucz publiczny.
+- Dla endpointów private (`/v4/client/private/*`) używany jest klucz private.
+- Kod ma fallback autoryzacji:
+  - najpierw `X-API-KEY` (zgodnie z nową dokumentacją),
+  - potem `Authorization: Bearer ...` (zgodnie ze starym działającym przykładem).
+
+Dzięki temu integracja działa zarówno pod nowy Swagger, jak i warianty starsze.
