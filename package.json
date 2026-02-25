@@ -1,0 +1,12 @@
+{
+  "name": "yshop-itemshop-license-suite",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:license": "npm --workspace apps/license-server run dev",
+    "dev:shop": "npm --workspace apps/client-shop run dev"
+  }
+}
