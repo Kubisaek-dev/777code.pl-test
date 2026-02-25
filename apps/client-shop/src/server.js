@@ -58,6 +58,15 @@ function parseServers(payload) {
     .filter((s) => s.id);
 }
 
+function slugifyServerName(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '');
+}
+
 function collectObjectsRecursively(value, out = []) {
   if (Array.isArray(value)) {
     for (const item of value) collectObjectsRecursively(item, out);
@@ -78,6 +87,37 @@ function tryBase64Decode(value) {
   } catch {
     return value;
   }
+}
+
+function cleanText(value) {
+  if (value == null) return '';
+  const decoded = tryBase64Decode(String(value));
+  return String(decoded)
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractPrice(item) {
+  const candidates = [
+    item?.price,
+    item?.lowestPrice,
+    item?.basePrice,
+    item?.finalPrice,
+    item?.cost,
+    item?.amount,
+    item?.pricing?.price,
+    item?.pricing?.gross,
+    item?.price?.gross,
+    item?.price?.value,
+    item?.priceGross
+  ];
+
+  for (const value of candidates) {
+    if (typeof value === 'number') return value;
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return null;
 }
 
 function parseProducts(payload) {
@@ -103,13 +143,10 @@ function parseProducts(payload) {
     .map((item) => ({
       id: item.id ?? item.productId ?? item.uuid,
       name: item.name ?? item.title ?? item.productName ?? 'Produkt',
-      description:
-        item.description ??
-        item.shortDescription ??
-        item.short_description ??
-        tryBase64Decode(item.short_description) ??
-        '',
-      price: item.price ?? item.lowestPrice ?? item.basePrice ?? null,
+      description: cleanText(
+        item.description ?? item.shortDescription ?? item.short_description ?? item.content ?? ''
+      ),
+      price: extractPrice(item),
       currency: item.currency ?? 'PLN',
       serverId: item.serverId ?? item.server?.id ?? item.server_id ?? null,
       original: item
@@ -242,10 +279,9 @@ async function requireLicense(_req, res, next) {
 async function fetchShopData({ shopSlug, serverId }) {
   const outputs = {};
 
-  const [shop, serversRaw, page, serverDetails] = await Promise.allSettled([
+  const [shop, serversRaw, serverDetails] = await Promise.allSettled([
     yshopRequest({ keyType: 'public', endpoint: '/v4/client/public/shop' }),
     yshopRequest({ keyType: 'public', endpoint: '/v4/client/public/servers' }),
-    yshopRequest({ keyType: 'public', endpoint: `/v4/client/public/page/${encodeURIComponent(shopSlug)}` }),
     serverId
       ? yshopRequest({ keyType: 'public', endpoint: `/v4/client/public/servers/${encodeURIComponent(serverId)}` })
       : Promise.resolve(null)
@@ -253,17 +289,15 @@ async function fetchShopData({ shopSlug, serverId }) {
 
   outputs.shop = shop.status === 'fulfilled' ? shop.value : null;
   outputs.serversRaw = serversRaw.status === 'fulfilled' ? serversRaw.value : null;
-  outputs.page = page.status === 'fulfilled' ? page.value : null;
+  outputs.page = null;
   outputs.serverDetails = serverDetails.status === 'fulfilled' ? serverDetails.value : null;
 
-  const warnings = [shop, serversRaw, page, serverDetails]
+  const warnings = [shop, serversRaw, serverDetails]
     .filter((r) => r.status === 'rejected')
     .map((r) => r.reason?.message)
     .filter(Boolean);
 
-  let products = parseProducts(outputs.shop)
-    .concat(parseProducts(outputs.page))
-    .concat(parseProducts(outputs.serverDetails));
+  let products = parseProducts(outputs.shop).concat(parseProducts(outputs.serverDetails));
 
   let servers = parseServers(outputs.serversRaw);
 
@@ -299,7 +333,7 @@ async function fetchShopData({ shopSlug, serverId }) {
   };
 }
 
-function renderPage({ shopSlug = '', serverId = '' }) {
+function renderPage({ shopSlug = '', serverId = '', serverSlug = '' }) {
   return `<!doctype html>
 <html lang='pl'>
 <head>
@@ -324,7 +358,7 @@ input{border:1px solid #334155;background:#0b1220;color:var(--text)}button{borde
   <section class='hero'>
     <h1>Premium ItemShop</h1>
     <p class='muted'>Widok jak yshop: /shop/{slug}/server/{id}. Domena licencji: <b>${siteDomain}</b></p>
-    <div class='muted'>Wybrany sklep (slug): <b>${shopSlug || '-'}</b> | serwer: <b>${serverId || 'all'}</b></div>
+    <div class='muted'>Wybrany sklep (slug): <b>${shopSlug || '-'}</b> | serwer: <b>${serverSlug || serverId || 'all'}</b></div>
     <form id='shopForm'>
       <input name='shopSlug' placeholder='slug sklepu, np. asdas715612as' value='${shopSlug}' required>
       <button>Przejdź do sklepu</button>
@@ -337,6 +371,7 @@ input{border:1px solid #334155;background:#0b1220;color:var(--text)}button{borde
 <script>
 const initialSlug=${JSON.stringify(shopSlug)};
 const initialServer=${JSON.stringify(serverId)};
+const initialServerSlug=${JSON.stringify(serverSlug)};
 const alerts=document.getElementById('alerts');
 const productsEl=document.getElementById('products');
 const serversEl=document.getElementById('servers');
@@ -352,7 +387,7 @@ document.getElementById('shopForm').addEventListener('submit', (ev)=>{
 });
 
 async function boot(){
-  const qs=new URLSearchParams({shopSlug:initialSlug,serverId:initialServer||''});
+  const qs=new URLSearchParams({shopSlug:initialSlug,serverId:initialServer||'',serverSlug:initialServerSlug||''});
   const r=await fetch('/api/shop-data?'+qs.toString());
   const data=await r.json();
 
@@ -366,7 +401,7 @@ async function boot(){
   serversEl.innerHTML='<a class="server-btn '+(activeServer===''?'active':'')+'" href="/shop/'+slug+'">Wszystkie</a>'+
     (data.servers||[]).map(function(s){
       const id=String(s.id);
-      return '<a class="server-btn '+(id===activeServer?'active':'')+'" href="/shop/'+slug+'/server/'+encodeURIComponent(id)+'">'+(s.name||id)+'</a>';
+      return '<a class="server-btn '+(id===activeServer?'active':'')+'" href="/shop/'+slug+'/'+encodeURIComponent(s.slug||id)+'">'+(s.name||id)+'</a>';
     }).join('');
 
   if(!data.products?.length){
@@ -384,7 +419,6 @@ async function boot(){
       +'<form data-id="'+p.id+'">'
       +'<input name="email" type="email" placeholder="email kupującego" required>'
       +'<input name="nickname" placeholder="nick gracza (opcjonalnie)">'
-      +'<input name="serverId" value="'+(activeServer||'')+'" placeholder="serverId (opcjonalnie)">'
       +'<button>Zapłać</button>'
       +'</form>'
       +'</article>';
@@ -398,7 +432,7 @@ async function boot(){
         productId:f.dataset.id,
         email:fd.get('email'),
         nickname:fd.get('nickname')||undefined,
-        serverId:fd.get('serverId')||undefined,
+        serverId:activeServer||undefined,
         shopSlug:initialSlug
       };
       const rr=await fetch('/api/payments/make',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
@@ -425,16 +459,41 @@ app.get('/shop/:shopSlug', requireLicense, (req, res) => {
   res.type('html').send(renderPage({ shopSlug: req.params.shopSlug, serverId: '' }));
 });
 
+app.get('/shop/:shopSlug/:serverSlug', requireLicense, (req, res) => {
+  res
+    .type('html')
+    .send(renderPage({ shopSlug: req.params.shopSlug, serverId: '', serverSlug: req.params.serverSlug }));
+});
+
 app.get('/shop/:shopSlug/server/:serverId', requireLicense, (req, res) => {
-  res.type('html').send(renderPage({ shopSlug: req.params.shopSlug, serverId: req.params.serverId }));
+  res.redirect(`/shop/${encodeURIComponent(req.params.shopSlug)}/${encodeURIComponent(req.params.serverId)}`);
 });
 
 app.get('/api/shop-data', requireLicense, async (req, res) => {
   const shopSlug = String(req.query.shopSlug || YSHOP_SHOP_SLUG || '').trim();
-  const serverId = String(req.query.serverId || '').trim();
+  let serverId = String(req.query.serverId || '').trim();
+  const serverSlug = String(req.query.serverSlug || '').trim();
   if (!shopSlug) return res.status(400).json({ error: 'Brak shopSlug. Użyj /shop/{slug}' });
 
+  if (!serverId && serverSlug) {
+    try {
+      const serversRaw = await yshopRequest({ keyType: 'public', endpoint: '/v4/client/public/servers' });
+      const mappedServers = parseServers(serversRaw).map((server) => ({
+        ...server,
+        slug: slugifyServerName(server.name) || String(server.id)
+      }));
+      const selected = mappedServers.find((server) => server.slug === serverSlug);
+      if (selected) serverId = String(selected.id);
+    } catch {
+      // if resolve fails, fetchShopData below will return API warnings
+    }
+  }
+
   const data = await fetchShopData({ shopSlug, serverId });
+  data.servers = (data.servers || []).map((server) => ({
+    ...server,
+    slug: slugifyServerName(server.name) || String(server.id)
+  }));
   return res.status(data.error ? 502 : 200).json(data);
 });
 
