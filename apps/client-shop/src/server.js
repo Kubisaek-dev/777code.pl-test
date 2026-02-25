@@ -89,9 +89,26 @@ function tryBase64Decode(value) {
   }
 }
 
+function looksLikeBase64(value) {
+  if (typeof value !== 'string') return false;
+  const normalized = value.trim();
+  if (!normalized || normalized.length < 8 || normalized.length % 4 !== 0) return false;
+  return /^[A-Za-z0-9+/=]+$/.test(normalized);
+}
+
+function getNestedValue(obj, path) {
+  let current = obj;
+  for (const key of path) {
+    if (current == null) return null;
+    current = current[key];
+  }
+  return current;
+}
+
 function cleanText(value) {
   if (value == null) return '';
-  const decoded = tryBase64Decode(String(value));
+  const raw = String(value).trim();
+  const decoded = looksLikeBase64(raw) ? tryBase64Decode(raw) : raw;
   return String(decoded)
     .replace(/<[^>]*>/g, ' ')
     .replace(/\s+/g, ' ')
@@ -110,14 +127,42 @@ function extractPrice(item) {
     item?.pricing?.gross,
     item?.price?.gross,
     item?.price?.value,
-    item?.priceGross
+    item?.priceGross,
+    getNestedValue(item, ['prices', 'lowest', 'gross']),
+    getNestedValue(item, ['prices', 'lowest', 'value']),
+    getNestedValue(item, ['prices', 'default', 'gross']),
+    getNestedValue(item, ['pricing', 'default', 'gross']),
+    getNestedValue(item, ['variants', 0, 'price']),
+    getNestedValue(item, ['variants', 0, 'gross'])
   ];
 
   for (const value of candidates) {
-    if (typeof value === 'number') return value;
-    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim()) {
+      const normalized = value.replace(',', '.').replace(/[^\d.-]/g, '').trim();
+      if (normalized) return normalized;
+    }
+    if (value && typeof value === 'object') {
+      const nested = value.gross ?? value.value ?? value.amount ?? value.pln;
+      if (typeof nested === 'number' && Number.isFinite(nested)) return nested;
+      if (typeof nested === 'string' && nested.trim()) return nested.trim();
+    }
   }
   return null;
+}
+
+function normalizeCurrency(item) {
+  const candidates = [
+    item?.currency,
+    item?.currencyCode,
+    item?.pricing?.currency,
+    item?.price?.currency,
+    getNestedValue(item, ['prices', 'lowest', 'currency'])
+  ];
+  for (const value of candidates) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return 'PLN';
 }
 
 function parseProducts(payload) {
@@ -133,8 +178,7 @@ function parseProducts(payload) {
 
     const looksLikeProduct =
       (obj.id || obj.productId || obj.uuid) &&
-      (obj.name || obj.title || obj.productName) &&
-      (Object.hasOwn(obj, 'price') || Object.hasOwn(obj, 'lowestPrice') || Object.hasOwn(obj, 'basePrice'));
+      (obj.name || obj.title || obj.productName);
 
     if (looksLikeProduct) found.push(obj);
   }
@@ -147,7 +191,7 @@ function parseProducts(payload) {
         item.description ?? item.shortDescription ?? item.short_description ?? item.content ?? ''
       ),
       price: extractPrice(item),
-      currency: item.currency ?? 'PLN',
+      currency: normalizeCurrency(item),
       serverId: item.serverId ?? item.server?.id ?? item.server_id ?? null,
       original: item
     }))
@@ -392,7 +436,7 @@ async function boot(){
   const data=await r.json();
 
   if(data.error){setAlert('err',data.error)}
-  if(Array.isArray(data.warnings) && data.warnings.length){
+  if((!data.products || !data.products.length) && Array.isArray(data.warnings) && data.warnings.length){
     setAlert('err',(data.error?data.error+' | ':'')+'API/Fallback warnings: '+data.warnings.join(' | '));
   }
 
