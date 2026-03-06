@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Item Shop</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <header class="header">
+        <h1>Item Shop</h1>
+        <p>Wybierz serwer, aby przejść na dedykowaną podstronę z produktami.</p>
+      </header>
+
+      <section>
+        <h2>Serwery</h2>
+        <nav id="servers" class="server-list"></nav>
+      </section>
+
+      <section>
+        <h2 id="products-title">Produkty</h2>
+        <div id="products" class="products-grid"></div>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
